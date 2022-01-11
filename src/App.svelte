@@ -1,6 +1,17 @@
 <script>
 	import { initializeApp } from "firebase/app";
+	import {
+addDoc,
+		collection,
+		connectFirestoreEmulator,
+		doc,
+		getFirestore,
+		onSnapshot,
+		query,
+	} from "firebase/firestore";
 	import SignIn from "./SignIn.svelte";
+	import { DateInput } from "date-picker-svelte";
+	import { onDestroy } from "svelte";
 
 	const firebaseConfig = {
 		apiKey: "AIzaSyDELqLj_TdQaSS46V7GoABf9Jf80qg5Qu0",
@@ -11,9 +22,16 @@
 		appId: "1:850619333270:web:3f9f2e8a940c7549d1a0b7",
 	};
 	const app = initializeApp(firebaseConfig);
+	let db = getFirestore();
+	if (location.hostname === "localhost") {
+		connectFirestoreEmulator(db, "localhost", 8080);
+	}
 	let user = null;
+	let unsub = null; // this sucks
+	onDestroy(() => {
+		if (unsub !== null) unsub();
+	});
 
-	import { DateInput } from "date-picker-svelte";
 	function fromNow(days) {
 		let toReturn = new Date();
 		toReturn.setDate(new Date().getDate() + days);
@@ -59,6 +77,8 @@
 		let hours = event.srcElement.elements["hours"].value;
 		let minutes = event.srcElement.elements["minutes"].value;
 
+		console.log(user);
+
 		let totalMinutes = 0;
 		if (hours.length > 0) {
 			totalMinutes += parseInt(hours) * 60;
@@ -71,20 +91,21 @@
 			error = "Without time, there is no change";
 			return;
 		}
-		todoList = [
-			...todoList,
-			{
-				text: desc,
-				status: false,
-				timeLength: totalMinutes,
-				due: dateInput,
-			},
-		];
-		error = "";
-		event.srcElement.elements["description"].value = "";
-		event.srcElement.elements["hours"].value = "";
-		event.srcElement.elements["minutes"].value = "";
-		event.srcElement.elements["description"].focus();
+		addDoc(collection(db, "users/" + user.uid + "/tasks"), {
+			text: desc,
+			status: false,
+			timeLength: totalMinutes,
+			due: dateInput,
+		}).then((result) => {
+			error = "";
+			event.srcElement.elements["description"].value = "";
+			event.srcElement.elements["hours"].value = "";
+			event.srcElement.elements["minutes"].value = "";
+			event.srcElement.elements["description"].focus();
+		}).catch((e) => {
+			error = "" + e;
+		});
+		
 		// 		event.srcElement.reset(); can't use this fucks up the date input
 	}
 
@@ -100,10 +121,30 @@
 		todoList.splice(index, 1);
 		todoList = todoList;
 	}
+
+	function onUser(u) {
+		user = u;
+		unsub = onSnapshot(
+			query(collection(db, "users/" + user.uid + "/tasks")),
+			(tasks) => {
+				let newTodoList = [];
+				tasks.forEach((doc) => {
+					newTodoList.push({
+						text: doc.data().text,
+						status: doc.data().status,
+						timeLength: doc.data().timeLength,
+						due: doc.data().due.toDate(),
+					});
+				});
+
+				todoList = newTodoList;
+			}
+		);
+	}
 </script>
 
 {#if user === null}
-	<SignIn onUser={(u) => (user = u)} />
+	<SignIn {onUser} />
 {:else}
 	<p>Welcome {user.displayName}</p>
 	<form on:submit|preventDefault={added}>
