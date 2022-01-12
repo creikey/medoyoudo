@@ -8,6 +8,7 @@ addDoc,
 		getFirestore,
 		onSnapshot,
 		query,
+		updateDoc,
 	} from "firebase/firestore";
 	import SignIn from "./SignIn.svelte";
 	import { DateInput } from "date-picker-svelte";
@@ -38,26 +39,10 @@ addDoc,
 		return toReturn;
 	}
 
-	let todoList = [
-		{
-			text: "Write my first post",
-			status: true,
-			timeLength: 60,
-			due: fromNow(1),
-		},
-		{
-			text: "Upload the post to the blog",
-			status: false,
-			timeLength: 75,
-			due: fromNow(2),
-		},
-		{
-			text: "Publish the post at Facebook",
-			status: false,
-			timeLength: 125,
-			due: fromNow(3),
-		},
-	];
+	// excepts documents of formnat seen when tasks are added, check
+	// that function
+	let todoList = [];
+	let doneList = [];
 
 	let error = "";
 	function fmtDate(date) {
@@ -76,8 +61,6 @@ addDoc,
 		let desc = event.srcElement.elements["description"].value;
 		let hours = event.srcElement.elements["hours"].value;
 		let minutes = event.srcElement.elements["minutes"].value;
-
-		console.log(user);
 
 		let totalMinutes = 0;
 		if (hours.length > 0) {
@@ -105,7 +88,6 @@ addDoc,
 		}).catch((e) => {
 			error = "" + e;
 		});
-		
 		// 		event.srcElement.reset(); can't use this fucks up the date input
 	}
 
@@ -117,9 +99,14 @@ addDoc,
 		return t % 60;
 	}
 
-	function removeFromList(index) {
-		todoList.splice(index, 1);
-		todoList = todoList;
+	function setIdStatus(id, newStatus) {
+		updateDoc(doc(db, "users/" + user.uid + "/tasks/" + id), {
+			status: newStatus,
+		}).then(() => {
+			error = "";
+		}).catch((e) => {
+			error = "" + e;
+		});
 	}
 
 	function onUser(u) {
@@ -128,8 +115,14 @@ addDoc,
 			query(collection(db, "users/" + user.uid + "/tasks")),
 			(tasks) => {
 				let newTodoList = [];
+				let newDoneList = []
 				tasks.forEach((doc) => {
-					newTodoList.push({
+					let targetList = newTodoList;
+					if(doc.data().status === true) {
+						targetList = newDoneList;
+					}
+					targetList.push({
+						id: doc.id,
 						text: doc.data().text,
 						status: doc.data().status,
 						timeLength: doc.data().timeLength,
@@ -138,6 +131,7 @@ addDoc,
 				});
 
 				todoList = newTodoList;
+				doneList = newDoneList;
 			}
 		);
 	}
@@ -185,25 +179,35 @@ addDoc,
 		</p>
 	{/if}
 
-	<br />
-	{#each todoList as item, index}
-		<input bind:checked={item.status} type="checkbox" />
-		<span class:checked={item.status}
-			>{item.text} | {getHours(item.timeLength) > 0
+	<br/>
+	{#each todoList as item}
+		<span>
+			{item.text} | {getHours(item.timeLength) > 0
 				? getHours(item.timeLength) + " hours"
 				: ""}
 			{getMinutes(item.timeLength) > 0
 				? getMinutes(item.timeLength) + " minutes"
 				: ""} | {fmtDate(item.due)}</span
 		>
-		<span id="x" on:click={() => removeFromList(index)}>L</span>
+		<span class="clickable" on:click={() => setIdStatus(item.id, true)}>🗑️</span>
 		<br />
 	{/each}
 	<hr />
 	<p>finished</p>
-
+	{#each doneList as item}
+		<span>
+			{item.text} | {getHours(item.timeLength) > 0
+				? getHours(item.timeLength) + " hours"
+				: ""}
+			{getMinutes(item.timeLength) > 0
+				? getMinutes(item.timeLength) + " minutes"
+				: ""} | {fmtDate(item.due)}</span
+		>
+		<span class="clickable" on:click={() => setIdStatus(item.id, false)}>♻️</span>
+		<br />
+	{/each}
 	<style>
-		#x {
+		.clickable {
 			cursor: pointer;
 		}
 		.number {
