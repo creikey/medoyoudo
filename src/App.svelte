@@ -1,7 +1,7 @@
 <script>
 	import { initializeApp } from "firebase/app";
 	import {
-addDoc,
+		addDoc,
 		collection,
 		connectFirestoreEmulator,
 		doc,
@@ -11,6 +11,7 @@ addDoc,
 		updateDoc,
 	} from "firebase/firestore";
 	import SignIn from "./SignIn.svelte";
+	import { user } from "./stores";
 	import { DateInput } from "date-picker-svelte";
 	import { onDestroy } from "svelte";
 
@@ -23,11 +24,10 @@ addDoc,
 		appId: "1:850619333270:web:3f9f2e8a940c7549d1a0b7",
 	};
 	const app = initializeApp(firebaseConfig);
-	let db = getFirestore();
+	const db = getFirestore();
 	if (location.hostname === "localhost") {
 		connectFirestoreEmulator(db, "localhost", 8080);
 	}
-	let user = null;
 	let unsub = null; // this sucks
 	onDestroy(() => {
 		if (unsub !== null) unsub();
@@ -39,8 +39,6 @@ addDoc,
 		return toReturn;
 	}
 
-	// excepts documents of formnat seen when tasks are added, check
-	// that function
 	let todoList = [];
 	let doneList = [];
 
@@ -74,20 +72,22 @@ addDoc,
 			error = "Without time, there is no change";
 			return;
 		}
-		addDoc(collection(db, "users/" + user.uid + "/tasks"), {
+		addDoc(collection(db, "users/" + $user.uid + "/tasks"), {
 			text: desc,
 			status: false,
 			timeLength: totalMinutes,
 			due: dateInput,
-		}).then((result) => {
-			error = "";
-			event.srcElement.elements["description"].value = "";
-			event.srcElement.elements["hours"].value = "";
-			event.srcElement.elements["minutes"].value = "";
-			event.srcElement.elements["description"].focus();
-		}).catch((e) => {
-			error = "" + e;
-		});
+		})
+			.then((result) => {
+				error = "";
+			})
+			.catch((e) => {
+				error = "" + e;
+			});
+		event.srcElement.elements["description"].value = "";
+		event.srcElement.elements["hours"].value = "";
+		event.srcElement.elements["minutes"].value = "";
+		event.srcElement.elements["description"].focus();
 		// 		event.srcElement.reset(); can't use this fucks up the date input
 	}
 
@@ -100,47 +100,57 @@ addDoc,
 	}
 
 	function setIdStatus(id, newStatus) {
-		updateDoc(doc(db, "users/" + user.uid + "/tasks/" + id), {
+		updateDoc(doc(db, "users/" + $user.uid + "/tasks/" + id), {
 			status: newStatus,
-		}).then(() => {
-			error = "";
-		}).catch((e) => {
-			error = "" + e;
-		});
+		})
+			.then(() => {
+				error = "";
+			})
+			.catch((e) => {
+				error = "" + e;
+			});
 	}
 
-	function onUser(u) {
-		user = u;
-		unsub = onSnapshot(
-			query(collection(db, "users/" + user.uid + "/tasks")),
-			(tasks) => {
-				let newTodoList = [];
-				let newDoneList = []
-				tasks.forEach((doc) => {
-					let targetList = newTodoList;
-					if(doc.data().status === true) {
-						targetList = newDoneList;
-					}
-					targetList.push({
-						id: doc.id,
-						text: doc.data().text,
-						status: doc.data().status,
-						timeLength: doc.data().timeLength,
-						due: doc.data().due.toDate(),
+	$: unsub = $user
+		? onSnapshot(
+				query(collection(db, "users/" + $user.uid + "/tasks")),
+				(tasks) => {
+					let newTodoList = [];
+					let newDoneList = [];
+					tasks.forEach((doc) => {
+						let targetList = newTodoList;
+						if (doc.data().status === true) {
+							targetList = newDoneList;
+						}
+						targetList.push({
+							id: doc.id,
+							text: doc.data().text,
+							status: doc.data().status,
+							timeLength: doc.data().timeLength,
+							due: doc.data().due.toDate(),
+						});
 					});
-				});
-
-				todoList = newTodoList;
-				doneList = newDoneList;
-			}
-		);
-	}
+					newTodoList = newTodoList
+						.sort(function (a, b) {
+							return new Date(b.due) - new Date(a.due);
+						})
+						.reverse();
+					newDoneList = newDoneList
+						.sort(function (a, b) {
+							return new Date(b.due) - new Date(a.due);
+						})
+						.reverse();
+					todoList = newTodoList;
+					doneList = newDoneList;
+				}
+		  )
+		: function () {};
 </script>
 
-{#if user === null}
-	<SignIn {onUser} />
+{#if $user === null}
+	<SignIn />
 {:else}
-	<p>Welcome {user.displayName}</p>
+	<p>Welcome {$user.displayName}</p>
 	<form on:submit|preventDefault={added}>
 		<input
 			type="text"
@@ -179,7 +189,7 @@ addDoc,
 		</p>
 	{/if}
 
-	<br/>
+	<br />
 	{#each todoList as item}
 		<span>
 			{item.text} | {getHours(item.timeLength) > 0
@@ -189,7 +199,9 @@ addDoc,
 				? getMinutes(item.timeLength) + " minutes"
 				: ""} | {fmtDate(item.due)}</span
 		>
-		<span class="clickable" on:click={() => setIdStatus(item.id, true)}>🗑️</span>
+		<span class="clickable" on:click={() => setIdStatus(item.id, true)}
+			>🗑️</span
+		>
 		<br />
 	{/each}
 	<hr />
@@ -203,7 +215,9 @@ addDoc,
 				? getMinutes(item.timeLength) + " minutes"
 				: ""} | {fmtDate(item.due)}</span
 		>
-		<span class="clickable" on:click={() => setIdStatus(item.id, false)}>♻️</span>
+		<span class="clickable" on:click={() => setIdStatus(item.id, false)}
+			>♻️</span
+		>
 		<br />
 	{/each}
 	<style>
