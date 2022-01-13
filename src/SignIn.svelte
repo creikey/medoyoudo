@@ -1,14 +1,11 @@
 <script>
-    import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "firebase/auth";
-    import { user } from './stores';
-
-    export let auth;
+    import { GoogleAuthProvider, signInWithPopup, getAuth } from "firebase/auth";
 
     let provider = new GoogleAuthProvider();
 
     let error = null;
     function onButton() {
-        signInWithPopup(auth, provider)
+        signInWithPopup(getAuth(), provider)
             .catch((e) => {
                 error = e;
             });

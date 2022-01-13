@@ -1,5 +1,4 @@
 <script>
-	import { initializeApp } from "firebase/app";
 	import {
 		addDoc,
 		collection,
@@ -15,15 +14,6 @@
 	import { DateInput } from "date-picker-svelte";
 	import { onDestroy } from "svelte";
 
-	const firebaseConfig = {
-		apiKey: "AIzaSyDELqLj_TdQaSS46V7GoABf9Jf80qg5Qu0",
-		authDomain: "medoyoudo-3998f.firebaseapp.com",
-		projectId: "medoyoudo-3998f",
-		storageBucket: "medoyoudo-3998f.appspot.com",
-		messagingSenderId: "850619333270",
-		appId: "1:850619333270:web:3f9f2e8a940c7549d1a0b7",
-	};
-	const app = initializeApp(firebaseConfig);
 	const db = getFirestore();
 	if (location.hostname === "localhost") {
 		connectFirestoreEmulator(db, "localhost", 8080);
@@ -191,6 +181,9 @@
 
 	<br />
 	{#each todoList as item}
+		<span class="clickable" on:click={() => setIdStatus(item.id, true)}
+			>🗑️</span
+		>
 		<span>
 			{item.text} | {getHours(item.timeLength) > 0
 				? getHours(item.timeLength) + " hours"
@@ -198,15 +191,15 @@
 			{getMinutes(item.timeLength) > 0
 				? getMinutes(item.timeLength) + " minutes"
 				: ""} | {fmtDate(item.due)}</span
-		>
-		<span class="clickable" on:click={() => setIdStatus(item.id, true)}
-			>🗑️</span
 		>
 		<br />
 	{/each}
 	<hr />
 	<p>finished</p>
 	{#each doneList as item}
+		<span class="clickable" on:click={() => setIdStatus(item.id, false)}
+			>♻️</span
+		>
 		<span>
 			{item.text} | {getHours(item.timeLength) > 0
 				? getHours(item.timeLength) + " hours"
@@ -215,9 +208,7 @@
 				? getMinutes(item.timeLength) + " minutes"
 				: ""} | {fmtDate(item.due)}</span
 		>
-		<span class="clickable" on:click={() => setIdStatus(item.id, false)}
-			>♻️</span
-		>
+
 		<br />
 	{/each}
 	<style>
