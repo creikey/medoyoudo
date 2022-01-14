@@ -1,6 +1,7 @@
 <script>
 	import {
 		addDoc,
+		deleteDoc,
 		collection,
 		connectFirestoreEmulator,
 		doc,
@@ -32,6 +33,7 @@
 			not_working: new Howl({src: ["https://wiki.teamfortress.com/w/images/b/b2/Vote_no.wav"], html5: true}),
 			new_task: new Howl({src: ["https://wiki.teamfortress.com/w/images/c/cf/Vote_success.wav"], html5: true}),
 			recycle_task: new Howl({src: ["https://wiki.teamfortress.com/w/images/5/50/Notification_alert.wav"], html5: true}),
+			delete_task: new Howl({src: ["https://wiki.teamfortress.com/w/images/6/6c/Trade_changed.wav"], html5: true}),
 		}
 	}
 	let not_muted = false;
@@ -54,7 +56,11 @@
 	}
 
 	function getHours(t) {
-		return Math.floor(t / 60).toFixed();
+		if(t > 0) {
+			return Math.floor(t / 60).toFixed();
+		} else {
+			return -Math.floor(-t / 60).toFixed();
+		}
 	}
 
 	function getMinutes(t) {
@@ -75,13 +81,33 @@
 
 	function fmtDuration(duration) {
 		let toReturn = "";
-		if (getHours(duration) > 0) {
+		if (Math.abs(getHours(duration)) > 0) {
 			toReturn += getHours(duration) + " hours";
 		}
-		if (getMinutes(duration) > 0) {
+		if (Math.abs(getMinutes(duration)) > 0) {
 			toReturn += " " + (duration % 60) + " minutes";
 		}
+		if(toReturn === "") {
+			toReturn = "0 minutes";
+		}
 		return toReturn;
+	}
+
+	function timeDiffToDays(timeDiff) {
+		return timeDiff / (1000 * 3600 * 24);
+	}
+
+	function getTimeLeftToday(start, due, workedOnFor, totalWork) {
+		var days = timeDiffToDays(due.getTime() - start.getTime());
+		var daysSinceStarting = timeDiffToDays((new Date()).getTime() - start.getTime())
+		var daysLeft = timeDiffToDays(due.getTime() - (new Date()).getTime());
+		let shouldveDoneAlready = Math.max(0.0, (daysSinceStarting - 1))*(totalWork/days);
+		if(workedOnFor < shouldveDoneAlready) {
+			return Math.floor((shouldveDoneAlready - workedOnFor) + (totalWork/daysLeft)).toFixed();
+		} else {
+			console.log(shouldveDoneAlready);
+			return Math.floor((totalWork/daysLeft) - (workedOnFor - shouldveDoneAlready)).toFixed();
+		}
 	}
 
 	let todoList = [];
@@ -140,6 +166,16 @@
 			status: newStatus,
 		})
 			.then(() => {
+				error = "";
+			})
+			.catch((e) => {
+				error = "" + e;
+			});
+	}
+
+	function deleteTask(id) {
+		playAudio(audios.delete_task);
+		deleteDoc(doc(db, "users/" + $user.uid + "/tasks/" + id)).then(() => {
 				error = "";
 			})
 			.catch((e) => {
@@ -335,7 +371,7 @@
 			>🗑️</span
 		>
 		<span>
-			{item.text} | {fmtDuration(item.timeLength)} | Worked on for {fmtDuration(item.workedOnFor)} | Started {fmtDate(item.startDate)} due {fmtDate(
+			{item.text} | {fmtDuration(getTimeLeftToday(item.startDate, item.due, item.workedOnFor, item.timeLength))} left today | {fmtDuration(item.timeLength - item.workedOnFor)} remaining | {fmtDuration(item.timeLength)} total | Started {fmtDate(item.startDate)} due {fmtDate(
 				item.due
 			)}</span
 		>
@@ -348,6 +384,9 @@
 	{#each doneList as item}
 		<span class="clickable" on:click={() => setIdStatus(item.id, false)}
 			>♻️</span
+		>
+		<span class="clickable" on:click={() => deleteTask(item.id)}
+			>🗑️</span
 		>
 		<span>
 			{item.text} | {fmtDuration(item.timeLength)} | {fmtDate(
