@@ -8,31 +8,40 @@
 		onSnapshot,
 		query,
 		updateDoc,
+		setDoc,
 	} from "firebase/firestore";
 	import SignIn from "./SignIn.svelte";
 	import { user } from "./stores";
 	import { DateInput } from "date-picker-svelte";
 	import { onDestroy } from "svelte";
+	import { Howl } from 'howler';
+	import Toggle from "svelte-toggle";
 
 	const db = getFirestore();
 	if (location.hostname === "localhost") {
 		connectFirestoreEmulator(db, "localhost", 8080);
 	}
-	let unsub = null; // this sucks
-	onDestroy(() => {
-		if (unsub !== null) unsub();
-	});
 
-	function fromNow(days) {
-		let toReturn = new Date();
-		toReturn.setDate(new Date().getDate() + days);
-		return toReturn;
+	// audio
+	let audios = {};
+	function loadAudio() {
+		// force html5 so no CORS errors
+		audios = {
+			trashed: new Howl({src: ["https://wiki.teamfortress.com/w/images/5/5c/Vote_yes.wav"], html5: true}),
+			working: new Howl({src: ["https://wiki.teamfortress.com/w/images/e/ef/Vote_started.wav"], html5: true}),
+			not_working: new Howl({src: ["https://wiki.teamfortress.com/w/images/b/b2/Vote_no.wav"], html5: true}),
+			new_task: new Howl({src: ["https://wiki.teamfortress.com/w/images/c/cf/Vote_success.wav"], html5: true}),
+			recycle_task: new Howl({src: ["https://wiki.teamfortress.com/w/images/5/50/Notification_alert.wav"], html5: true}),
+		}
+	}
+	let not_muted = false;
+	function playAudio(audio) {
+		if(not_muted) {
+			audio.play();
+		}
 	}
 
-	let todoList = [];
-	let doneList = [];
-
-	let error = "";
+	// utility functions
 	function fmtDate(date) {
 		return (
 			date.getMonth() +
@@ -44,7 +53,42 @@
 		);
 	}
 
+	function getHours(t) {
+		return Math.floor(t / 60).toFixed();
+	}
+
+	function getMinutes(t) {
+		return t % 60;
+	}
+
+	// https://stackoverflow.com/questions/8888491/how-do-you-display-javascript-datetime-in-12-hour-am-pm-format
+	function formatAMPM(date) {
+		var hours = date.getHours();
+		var minutes = date.getMinutes();
+		var ampm = hours >= 12 ? 'pm' : 'am';
+		hours = hours % 12;
+		hours = hours ? hours : 12; // the hour '0' should be '12'
+		minutes = minutes < 10 ? '0'+minutes : minutes;
+		var strTime = hours + ':' + minutes + ' ' + ampm;
+		return strTime;
+	}
+
+	function fmtDuration(duration) {
+		let toReturn = "";
+		if (getHours(duration) > 0) {
+			toReturn += getHours(duration) + " hours";
+		}
+		if (getMinutes(duration) > 0) {
+			toReturn += " " + (duration % 60) + " minutes";
+		}
+		return toReturn;
+	}
+
+	let todoList = [];
+	let doneList = [];
+	let error = "";
 	let dateInput;
+
 	function added(event) {
 		let desc = event.srcElement.elements["description"].value;
 		let hours = event.srcElement.elements["hours"].value;
@@ -57,7 +101,6 @@
 		if (minutes.length > 0) {
 			totalMinutes += parseInt(minutes);
 		}
-		2;
 		if (totalMinutes <= 0) {
 			error = "Without time, there is no change";
 			return;
@@ -67,6 +110,8 @@
 			status: false,
 			timeLength: totalMinutes,
 			due: dateInput,
+			workedOnFor: 0,
+			startDate: new Date(),
 		})
 			.then((result) => {
 				error = "";
@@ -78,18 +123,19 @@
 		event.srcElement.elements["hours"].value = "";
 		event.srcElement.elements["minutes"].value = "";
 		event.srcElement.elements["description"].focus();
+		playAudio(audios.new_task);
 		// 		event.srcElement.reset(); can't use this fucks up the date input
 	}
 
-	function getHours(t) {
-		return Math.floor(t / 60).toFixed();
-	}
-
-	function getMinutes(t) {
-		return t % 60;
-	}
-
 	function setIdStatus(id, newStatus) {
+		if(id === userData.workingOn) {
+			setWorkingOn(id);
+		}
+		if(newStatus === true) {
+			playAudio(audios.trashed)
+		} else {
+			playAudio(audios.recycle_task)
+		}
 		updateDoc(doc(db, "users/" + $user.uid + "/tasks/" + id), {
 			status: newStatus,
 		})
@@ -101,8 +147,88 @@
 			});
 	}
 
-	$: unsub = $user
-		? onSnapshot(
+	let workInterval = null;
+	let workIntervalTarget = null;
+	function setWorkingOn(id) {
+		let newWorkingOn = id === userData.workingOn ? "" : id;
+		let audio = null;
+		if(workInterval !== null) {
+			clearInterval(workInterval);
+			workInterval = null;
+		}
+		if(newWorkingOn !== "") {
+			playAudio(audios.working);
+			workInterval = setInterval(() => {
+				updateDoc(doc(db, "users" + "/" + $user.uid + "/tasks/" + id), {
+					workedOnFor: getCachedTaskFromID(id, todoList).workedOnFor + 1,
+				})
+			}, 1000);
+			workIntervalTarget = id;
+		} else {
+			playAudio(audios.not_working);
+		}
+		setDoc(doc(db, "users" + "/" + $user.uid), {
+			workingOn: newWorkingOn,
+			workingSince: new Date(),
+		}, { merge: true })
+	}
+
+	let userUnsubs = []; // all called when component being destroyed or user logging out
+	let userData = {
+		workingOn: "",
+		workingSince: new Date(),
+	};
+
+	$: curWorkingTask = getCachedTaskFromID(userData.workingOn, todoList)
+
+	function getCachedTaskFromID(id, todoList) {
+		if(id === "") {
+			return null;
+		}
+		for(let i = 0; i < todoList.length; i++) {
+			if(todoList[i].id === id) {
+				return todoList[i];
+			}
+		}
+		console.error("Could not find working on id " + id);
+		return null;
+	}
+	
+	function beforeUnload() {
+		if(workInterval !== null) {
+			event.preventDefault();
+			event.returnValue = '';
+			return '';
+		}
+	}
+
+	const unsubscribe = user.subscribe((value) => {
+		for (let i = 0; i < userUnsubs.length; i++) {
+			userUnsubs[i]();
+		}
+		userUnsubs = [];
+
+		if ($user === null) {
+			return;
+		}
+		userUnsubs.push(
+			onSnapshot(doc(db, "users", $user.uid), (userDoc) => {
+				if(userDoc !== undefined && userDoc.data() !== undefined) {
+					userData["workingOn"] = userDoc.data().workingOn;
+					userData["workingSince"] = userDoc.data().workingSince.toDate();
+				} else {
+					userData["workingOn"] = "";
+					userData["workingSince"] = new Date();
+				}
+				if(workInterval !== null && (userData.workingOn === "" || userData.workingOn !== workIntervalTarget)) {
+					clearInterval(workInterval);
+					workInterval = null;
+				}
+				userData = userData;
+			})
+		);
+		userUnsubs.push(
+			onSnapshot(
 				query(collection(db, "users/" + $user.uid + "/tasks")),
 				(tasks) => {
 					let newTodoList = [];
@@ -117,6 +243,12 @@
 							text: doc.data().text,
 							status: doc.data().status,
 							timeLength: doc.data().timeLength,
+							workedOnFor: doc.data().workedOnFor
+								? doc.data().workedOnFor
+								: 0,
+							startDate: doc.data().startDate
+								? doc.data().startDate.toDate()
+								: new Date(),
 							due: doc.data().due.toDate(),
 						});
 					});
@@ -127,15 +259,26 @@
 						.reverse();
 					newDoneList = newDoneList
 						.sort(function (a, b) {
-							return new Date(b.due) - new Date(a.due);
+							return new Date(b.startDate) - new Date(a.startDate);
 						})
 						.reverse();
 					todoList = newTodoList;
 					doneList = newDoneList;
 				}
-		  )
-		: function () {};
+			)
+		);
+	});
+
+	onDestroy(() => {
+		for (let i = 0; i < userUnsubs.length; i++) {
+			userUnsubs[i]();
+		}
+	});
 </script>
+
+<svelte:window on:beforeunload={beforeUnload}/>
+
+<Toggle on:toggle={loadAudio} label="Team Fortress 2 Sound Effects" bind:toggled={not_muted}/>
 
 {#if $user === null}
 	<SignIn />
@@ -179,20 +322,26 @@
 		</p>
 	{/if}
 
+	{#if curWorkingTask !== null}
+	<p>Working on {curWorkingTask.text} since {formatAMPM(userData.workingSince)}</p>
+	{:else}
+	<p>Press the briefcase to work on something</p>
+	{/if}
+
 	<br />
 	{#each todoList as item}
+	<div class={item.id===userData.workingOn ? "wrkingon": ""}>
 		<span class="clickable" on:click={() => setIdStatus(item.id, true)}
 			>🗑️</span
 		>
 		<span>
-			{item.text} | {getHours(item.timeLength) > 0
-				? getHours(item.timeLength) + " hours"
-				: ""}
-			{getMinutes(item.timeLength) > 0
-				? getMinutes(item.timeLength) + " minutes"
-				: ""} | {fmtDate(item.due)}</span
+			{item.text} | {fmtDuration(item.timeLength)} | Worked on for {fmtDuration(item.workedOnFor)} | Started {fmtDate(item.startDate)} due {fmtDate(
+				item.due
+			)}</span
 		>
+		<span class="clickable" on:click={() => setWorkingOn(item.id)}>💼</span>
 		<br />
+	</div>
 	{/each}
 	<hr />
 	<p>finished</p>
@@ -201,12 +350,9 @@
 			>♻️</span
 		>
 		<span>
-			{item.text} | {getHours(item.timeLength) > 0
-				? getHours(item.timeLength) + " hours"
-				: ""}
-			{getMinutes(item.timeLength) > 0
-				? getMinutes(item.timeLength) + " minutes"
-				: ""} | {fmtDate(item.due)}</span
+			{item.text} | {fmtDuration(item.timeLength)} | {fmtDate(
+				item.due
+			)}</span
 		>
 
 		<br />
@@ -224,6 +370,11 @@
 		}
 		.checked {
 			text-decoration: line-through;
+		}
+		.wrkingon {
+			padding-top: 1em;
+			padding-bottom: 1em;
+			background-color: lightgreen;
 		}
 	</style>
 {/if}
