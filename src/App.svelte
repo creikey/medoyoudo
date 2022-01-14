@@ -198,7 +198,7 @@
 				updateDoc(doc(db, "users" + "/" + $user.uid + "/tasks/" + id), {
 					workedOnFor: getCachedTaskFromID(id, todoList).workedOnFor + 1,
 				})
-			}, 1000);
+			}, 1000 * 60);
 			workIntervalTarget = id;
 		} else {
 			playAudio(audios.not_working);
